@@ -319,8 +319,9 @@ function runLogger() {
         
         messages.forEach(message => {
           // Check if already processed
-          const labels = message.getLabelIds();
-          if (labels.includes(processedLabel.getId())) {
+          const messageLabels = message.getLabels();
+          const hasProcessedLabel = messageLabels.some(label => label.getName() === LABEL_NAME);
+          if (hasProcessedLabel) {
             return;
           }
           
