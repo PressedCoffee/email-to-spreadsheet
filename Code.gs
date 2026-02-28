@@ -315,24 +315,24 @@ function runLogger() {
       const threads = GmailApp.search(rule.query, 0, maxEmails);
       
       threads.forEach(thread => {
+        // Check if thread already processed (labels exist on threads, not messages)
+        const threadLabels = thread.getLabels();
+        const hasProcessedLabel = threadLabels.some(label => label.getName() === LABEL_NAME);
+        if (hasProcessedLabel) {
+          return; // Skip this entire thread
+        }
+
         const messages = thread.getMessages();
-        
+
         messages.forEach(message => {
-          // Check if already processed
-          const messageLabels = message.getLabels();
-          const hasProcessedLabel = messageLabels.some(label => label.getName() === LABEL_NAME);
-          if (hasProcessedLabel) {
-            return;
-          }
-          
           // Log the message
           const logRow = createLogRow(message, rule, categories, logBody, bodyMaxChars);
           logSheet.appendRow(logRow);
-          
-          // Mark as processed
-          message.addLabel(processedLabel);
           totalLogged++;
         });
+
+        // Mark entire thread as processed
+        thread.addLabel(processedLabel);
       });
       
       Logger.log(`Processed rule "${rule.name}": ${threads.length} threads found`);
