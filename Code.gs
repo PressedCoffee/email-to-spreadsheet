@@ -427,11 +427,12 @@ function createLogRow(message, rule, categories, logBody, bodyMaxChars) {
   
   // Build Gmail link
   const messageId = message.getId();
-  const threadId = message.getThread().getId();
+  const thread = message.getThread();
+  const threadId = thread.getId();
   const gmailLink = `https://mail.google.com/mail/u/0/#inbox/${threadId}`;
   
-  // Get labels as comma-separated string
-  const labels = message.getLabels().map(l => l.getName()).join(', ');
+  // Get labels as comma-separated string (labels exist on threads, not messages)
+  const labels = thread.getLabels().map(l => l.getName()).join(', ');
   
   return [
     new Date().toISOString(),      // Logged At
