@@ -3,7 +3,7 @@
 Automatically log Gmail messages to a Google Sheet based on filter rules. No Zapier, no third-party services — just Google Apps Script.
 
 **Demo:** <https://youtu.be/placeholder> (coming soon)  
-**Try it:** [Make a copy](https://docs.google.com/spreadsheets/d/1placeholder/copy) (coming soon)
+**Try it:** [Make a copy](https://docs.google.com/spreadsheets/d/1Rwom9A7Vn8Fc4_P9NC-9kBge_qC57tyQD28U20Sw6QY/copy) 
 
 ## What it does
 
@@ -24,7 +24,7 @@ Automatically log Gmail messages to a Google Sheet based on filter rules. No Zap
 
 ### 1. Copy the template
 
-[Make a copy of this spreadsheet](https://docs.google.com/spreadsheets/d/1placeholder/copy)
+[Make a copy of this spreadsheet](https://docs.google.com/spreadsheets/d/1Rwom9A7Vn8Fc4_P9NC-9kBge_qC57tyQD28U20Sw6QY/copy)
 
 ### 2. Set up the script
 
