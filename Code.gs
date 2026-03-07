@@ -1,7 +1,8 @@
 /**
- * Email-to-Spreadsheet Logger
+ * Email-to-Spreadsheet Logger v2.0
  * 
- * Automatically log Gmail messages to a Google Sheet based on filter rules.
+ * Inbox capture layer for the Gmail Automation Suite.
+ * Logs Gmail messages with enriched metadata for relationship intelligence.
  * 
  * Setup: Click Extensions → Apps Script, paste this code, save, then run setupTemplate().
  */
@@ -53,7 +54,8 @@ function setupTemplate() {
     'Next steps:\n' +
     '1. Configure your Gmail search rules in the "Rules" tab\n' +
     '2. Set your auto-categorization keywords in "Categories"\n' +
-    '3. Run "▶️ Run Logger Now" to test, or wait for auto-run\n\n' +
+    '3. Add your email addresses to Settings (Internal Emails)\n' +
+    '4. Run "▶️ Run Logger Now" to test, or wait for auto-run\n\n' +
     'The logger will run automatically every 15 minutes.', 
     ui.ButtonSet.OK);
 }
@@ -65,7 +67,6 @@ function createSettingsSheet(ss) {
   let sheet = ss.getSheetByName(SHEET_NAMES.SETTINGS);
   
   if (sheet) {
-    // Sheet exists, skip
     return;
   }
   
@@ -82,7 +83,11 @@ function createSettingsSheet(ss) {
     ['Log Body Content', 'No'],
     ['Body Max Characters', '500'],
     ['Label for Processed Emails', LABEL_NAME],
-    ['Last Run Timestamp', 'Never']
+    ['Last Run Timestamp', 'Never'],
+    ['', ''],
+    ['Internal Emails (comma-separated)', ''],
+    ['Client ID Prefix', 'C'],
+    ['Auto-assign Client IDs', 'Yes']
   ];
   
   sheet.getRange(2, 1, settings.length, 2).setValues(settings);
@@ -90,12 +95,14 @@ function createSettingsSheet(ss) {
   // Formatting
   sheet.getRange('A:A').setFontWeight('bold');
   sheet.autoResizeColumns(1, 2);
-  sheet.setColumnWidth(1, 30);
-  sheet.setColumnWidth(2, 30);
+  sheet.setColumnWidth(1, 35);
+  sheet.setColumnWidth(2, 50);
   
-  // Add note
-  sheet.getRange('A1').setNote('Configure how the email logger behaves');
-}
+  // Add notes
+  sheet.getRange('A8').setNote('Your email addresses (used to determine direction: inbound vs outbound)');
+  sheet.getRange('A9').setNote('Prefix for auto-generated Client IDs (e.g., C001, C002)');
+  sheet.getRange('A10').setNote('Automatically assign Client IDs to new email addresses');
+};
 
 /**
  * Creates Rules sheet for defining Gmail search queries
@@ -116,8 +123,9 @@ function createRulesSheet(ss) {
   
   // Sample rules
   const sampleRules = [
-    ['Yes', 'Stripe Receipts', 'from:stripe.com subject:receipt', 'Payment receipts from Stripe'],
-    ['Yes', 'Client Emails', 'from:client@example.com OR from:another@client.com', 'Emails from important clients'],
+    ['Yes', 'All Inbox', 'in:inbox', 'All inbox messages'],
+    ['Yes', 'All Sent', 'in:sent', 'All sent messages'],
+    ['No', 'Stripe Receipts', 'from:stripe.com subject:receipt', 'Payment receipts from Stripe'],
     ['No', 'Newsletters', 'label:Newsletter', 'Weekly newsletters (disabled by default)']
   ];
   
@@ -133,7 +141,7 @@ function createRulesSheet(ss) {
   sheet.autoResizeColumns(1, headers.length);
   sheet.setColumnWidth(1, 10);
   sheet.setColumnWidth(2, 20);
-  sheet.setColumnWidth(3, 40);
+  sheet.setColumnWidth(3, 50);
   sheet.setColumnWidth(4, 30);
   
   // Conditional formatting for Enabled column
@@ -180,7 +188,7 @@ function createCategoriesSheet(ss) {
   // Formatting
   sheet.autoResizeColumns(1, headers.length);
   sheet.setColumnWidth(1, 20);
-  sheet.setColumnWidth(2, 40);
+  sheet.setColumnWidth(2, 45);
   sheet.setColumnWidth(3, 10);
   
   // Note
@@ -188,7 +196,7 @@ function createCategoriesSheet(ss) {
 }
 
 /**
- * Creates Log sheet for storing email records
+ * Creates Log sheet for storing email records with enriched metadata
  */
 function createLogSheet(ss) {
   let sheet = ss.getSheetByName(SHEET_NAMES.LOG);
@@ -199,20 +207,33 @@ function createLogSheet(ss) {
   
   sheet = ss.insertSheet(SHEET_NAMES.LOG);
   
-  // Headers
+  // Headers - enriched metadata
   const headers = [
-    'Logged At',
-    'Rule Name',
-    'From',
-    'To',
-    'Subject',
-    'Date Sent',
-    'Category',
-    'Snippet',
-    'Labels',
-    'Message ID',
-    'Thread ID',
-    'Gmail Link'
+    'Logged At',           // A - When we logged it
+    'Rule Name',           // B - Which rule matched
+    'From',                // C - Raw From header
+    'To',                  // D - Raw To header
+    'Subject',             // E - Email subject
+    'Date Sent',           // F - When email was sent
+    'Category',            // G - Auto-categorized
+    'Snippet',             // H - Body preview
+    'Labels',              // I - Gmail labels
+    'Message ID',          // J - Unique message ID
+    'Thread ID',           // K - Gmail thread ID
+    'Gmail Link',          // L - Direct link
+    // Enriched metadata
+    'Primary Contact Email',  // M - Extracted primary contact
+    'Direction',              // N - Inbound / Outbound / Internal
+    'Domain',                 // O - Email domain
+    'Participants',           // P - All participants (comma-separated)
+    'Participants Count',     // Q - Number of participants
+    'Is Internal',            // R - Yes/No
+    'Thread Message Count',   // S - Messages in thread
+    'Thread Start Date',      // T - First message date
+    'Last Message In Thread', // U - Last message date
+    'Last Sender',            // V - Who sent last message
+    'Waiting On',             // W - Who we're waiting for reply from
+    'Client ID'               // X - Auto-assigned or matched client ID
   ];
   
   sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
@@ -220,10 +241,10 @@ function createLogSheet(ss) {
   
   // Formatting
   sheet.setFrozenRows(1);
-  sheet.autoResizeColumns(1, headers.length);
   
   // Set column widths
-  const widths = [18, 20, 25, 25, 40, 18, 15, 50, 20, 25, 25, 50];
+  const widths = [18, 15, 25, 25, 40, 18, 15, 40, 20, 25, 25, 45, 
+                  25, 12, 20, 50, 15, 12, 18, 18, 18, 25, 25, 12];
   widths.forEach((width, i) => sheet.setColumnWidth(i + 1, width));
 }
 
@@ -231,7 +252,6 @@ function createLogSheet(ss) {
  * Sets up time-driven trigger based on settings
  */
 function setupTrigger() {
-  // Delete existing triggers first
   deleteTriggers();
   
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -244,7 +264,6 @@ function setupTrigger() {
   const intervalCell = settingsSheet.getRange('B2').getValue();
   const intervalMinutes = parseInt(intervalCell) || 15;
   
-  // Create new trigger
   ScriptApp.newTrigger('runLogger')
     .timeBased()
     .everyMinutes(intervalMinutes)
@@ -263,8 +282,244 @@ function deleteTriggers() {
   });
 }
 
+// ============================================================================
+// HELPER FUNCTIONS FOR EMAIL PARSING AND ENRICHMENT
+// ============================================================================
+
 /**
- * Main logger function - searches Gmail and logs new messages
+ * Extracts the primary email address from a From/To header
+ * @param {string} header - Raw email header (e.g., "John Doe <john@example.com>")
+ * @returns {string} - Clean email address
+ */
+function extractEmailAddress(header) {
+  if (!header) return '';
+  
+  // Handle multiple recipients (To field)
+  const emails = header.match(/[\w.-]+@[\w.-]+\.\w+/g);
+  if (emails && emails.length > 0) {
+    return emails[0].toLowerCase();
+  }
+  return '';
+}
+
+/**
+ * Extracts all email addresses from a header
+ * @param {string} header - Raw email header
+ * @returns {string[]} - Array of email addresses
+ */
+function extractAllEmailAddresses(header) {
+  if (!header) return [];
+  const emails = header.match(/[\w.-]+@[\w.-]+\.\w+/g);
+  return emails ? emails.map(e => e.toLowerCase()) : [];
+}
+
+/**
+ * Extracts domain from an email address
+ * @param {string} email - Email address
+ * @returns {string} - Domain part
+ */
+function extractDomain(email) {
+  if (!email || !email.includes('@')) return '';
+  return email.split('@')[1].toLowerCase();
+}
+
+/**
+ * Determines the direction of an email (Inbound, Outbound, Internal)
+ * @param {string} from - From email address
+ * @param {string[]} to - To email addresses
+ * @param {string[]} internalEmails - List of internal email addresses
+ * @returns {string} - 'Inbound', 'Outbound', or 'Internal'
+ */
+function determineDirection(from, to, internalEmails) {
+  const fromLower = from.toLowerCase();
+  const toLower = to.map(e => e.toLowerCase());
+  const internalLower = internalEmails.map(e => e.toLowerCase());
+  
+  const fromIsInternal = internalLower.includes(fromLower);
+  const toHasInternal = toLower.some(e => internalLower.includes(e));
+  
+  if (fromIsInternal && toHasInternal) {
+    return 'Internal';
+  } else if (fromIsInternal) {
+    return 'Outbound';
+  } else if (toHasInternal) {
+    return 'Inbound';
+  }
+  
+  // Default: if we can't determine, check if we're in the To list
+  return 'Inbound';
+}
+
+/**
+ * Checks if an email is internal (to/from our domain)
+ * @param {string} from - From email address
+ * @param {string[]} to - To email addresses
+ * @param {string[]} internalEmails - List of internal email addresses
+ * @returns {boolean}
+ */
+function isInternalEmail(from, to, internalEmails) {
+  const fromLower = from.toLowerCase();
+  const toLower = to.map(e => e.toLowerCase());
+  const internalLower = internalEmails.map(e => e.toLowerCase());
+  
+  return internalLower.includes(fromLower) && toLower.every(e => internalLower.includes(e));
+}
+
+/**
+ * Extracts primary contact email from a message
+ * For inbound: the sender
+ * For outbound: the first recipient
+ * @param {string} direction - 'Inbound', 'Outbound', or 'Internal'
+ * @param {string} from - From email address
+ * @param {string[]} to - To email addresses
+ * @param {string[]} internalEmails - List of internal email addresses
+ * @returns {string} - Primary contact email
+ */
+function extractPrimaryContact(direction, from, to, internalEmails) {
+  const internalLower = internalEmails.map(e => e.toLowerCase());
+  
+  if (direction === 'Inbound') {
+    return from.toLowerCase();
+  } else if (direction === 'Outbound') {
+    // Return first non-internal recipient
+    for (const email of to) {
+      if (!internalLower.includes(email.toLowerCase())) {
+        return email.toLowerCase();
+      }
+    }
+    // Fallback to first To
+    return to.length > 0 ? to[0].toLowerCase() : '';
+  } else {
+    // Internal - return first non-internal participant or empty
+    for (const email of to) {
+      if (!internalLower.includes(email.toLowerCase())) {
+        return email.toLowerCase();
+      }
+    }
+    return from.toLowerCase();
+  }
+}
+
+/**
+ * Gets all unique participants in a message
+ * @param {string} from - From email address
+ * @param {string[]} to - To email addresses
+ * @param {string} cc - CC header (optional)
+ * @returns {string[]} - Unique participants
+ */
+function getParticipants(from, to, cc) {
+  const participants = new Set();
+  
+  if (from) {
+    const fromEmails = extractAllEmailAddresses(from);
+    fromEmails.forEach(e => participants.add(e.toLowerCase()));
+  }
+  
+  if (to) {
+    to.forEach(e => participants.add(e.toLowerCase()));
+  }
+  
+  if (cc) {
+    const ccEmails = extractAllEmailAddresses(cc);
+    ccEmails.forEach(e => participants.add(e.toLowerCase()));
+  }
+  
+  return Array.from(participants);
+}
+
+/**
+ * Builds a thread summary by fetching all messages in the thread
+ * @param {GmailThread} thread - Gmail thread object
+ * @returns {Object} - Thread summary
+ */
+function buildThreadSummary(thread) {
+  const messages = thread.getMessages();
+  const messageCount = messages.length;
+  
+  if (messageCount === 0) {
+    return {
+      messageCount: 0,
+      startDate: null,
+      lastDate: null,
+      lastSender: '',
+      firstSender: ''
+    };
+  }
+  
+  // Sort by date
+  messages.sort((a, b) => a.getDate().getTime() - b.getDate().getTime());
+  
+  const startDate = messages[0].getDate();
+  const lastDate = messages[messages.length - 1].getDate();
+  const lastSender = extractEmailAddress(messages[messages.length - 1].getFrom());
+  const firstSender = extractEmailAddress(messages[0].getFrom());
+  
+  return {
+    messageCount,
+    startDate,
+    lastDate,
+    lastSender,
+    firstSender
+  };
+}
+
+/**
+ * Computes "Waiting On" - who we're waiting for a reply from
+ * @param {string} direction - Direction of current message
+ * @param {string} lastSender - Who sent the last message in thread
+ * @param {string} primaryContact - Primary contact email
+ * @param {string[]} internalEmails - List of internal email addresses
+ * @returns {string} - 'Us', 'Them', or 'Unknown'
+ */
+function computeWaitingOn(direction, lastSender, primaryContact, internalEmails) {
+  const internalLower = internalEmails.map(e => e.toLowerCase());
+  const lastSenderLower = lastSender.toLowerCase();
+  
+  if (internalLower.includes(lastSenderLower)) {
+    // Last message was from us
+    return 'Them';
+  } else {
+    // Last message was from them
+    return 'Us';
+  }
+}
+
+/**
+ * Gets or assigns a Client ID for an email address
+ * @param {string} email - Email address to look up
+ * @param {Spreadsheet} ss - Spreadsheet object
+ * @returns {string} - Client ID (existing or newly assigned)
+ */
+function getOrAssignClientId(email, ss) {
+  // Client ID assignment is handled by client-reminder app
+  // For now, return empty string - this will be populated by the sync
+  return '';
+}
+
+/**
+ * Gets internal email addresses from settings
+ * @param {Spreadsheet} ss - Spreadsheet object
+ * @returns {string[]} - Array of internal email addresses
+ */
+function getInternalEmails(ss) {
+  const settingsSheet = ss.getSheetByName(SHEET_NAMES.SETTINGS);
+  if (!settingsSheet) return [];
+  
+  const internalEmailsStr = settingsSheet.getRange('B8').getValue();
+  if (!internalEmailsStr) return [];
+  
+  return internalEmailsStr.toString()
+    .split(',')
+    .map(e => e.trim().toLowerCase())
+    .filter(e => e.length > 0);
+}
+
+// ============================================================================
+// MAIN LOGGER FUNCTION
+// ============================================================================
+
+/**
+ * Main logger function - searches Gmail and logs new messages with enriched metadata
  */
 function runLogger() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -282,6 +537,7 @@ function runLogger() {
   const maxEmails = parseInt(settingsSheet.getRange('B3').getValue()) || 100;
   const logBody = settingsSheet.getRange('B4').getValue().toString().toLowerCase() === 'yes';
   const bodyMaxChars = parseInt(settingsSheet.getRange('B5').getValue()) || 500;
+  const internalEmails = getInternalEmails(ss);
   
   // Get categories for auto-categorization
   const categories = getCategories(categoriesSheet);
@@ -315,22 +571,24 @@ function runLogger() {
       const threads = GmailApp.search(rule.query, 0, maxEmails);
       
       threads.forEach(thread => {
-        // Check if thread already processed (labels exist on threads, not messages)
+        // Check if thread already processed
         const threadLabels = thread.getLabels();
         const hasProcessedLabel = threadLabels.some(label => label.getName() === LABEL_NAME);
         if (hasProcessedLabel) {
-          return; // Skip this entire thread
+          return;
         }
-
+        
+        // Build thread summary
+        const threadSummary = buildThreadSummary(thread);
+        
         const messages = thread.getMessages();
-
         messages.forEach(message => {
-          // Log the message
-          const logRow = createLogRow(message, rule, categories, logBody, bodyMaxChars);
+          // Log the message with enriched metadata
+          const logRow = createEnrichedLogRow(message, rule, categories, logBody, bodyMaxChars, internalEmails, threadSummary, ss);
           logSheet.appendRow(logRow);
           totalLogged++;
         });
-
+        
         // Mark entire thread as processed
         thread.addLabel(processedLabel);
       });
@@ -355,10 +613,9 @@ function getEnabledRules(sheet) {
   const data = sheet.getDataRange().getValues();
   const rules = [];
   
-  // Skip header row
   for (let i = 1; i < data.length; i++) {
     const row = data[i];
-    if (row[0] === 'Yes' && row[2]) { // Enabled and has query
+    if (row[0] === 'Yes' && row[2]) {
       rules.push({
         enabled: row[0],
         name: row[1],
@@ -375,14 +632,11 @@ function getEnabledRules(sheet) {
  * Extracts categories from Categories sheet
  */
 function getCategories(sheet) {
-  if (!sheet) {
-    return [];
-  }
+  if (!sheet) return [];
   
   const data = sheet.getDataRange().getValues();
   const categories = [];
   
-  // Skip header row
   for (let i = 1; i < data.length; i++) {
     const row = data[i];
     if (row[0] && row[1]) {
@@ -394,9 +648,7 @@ function getCategories(sheet) {
     }
   }
   
-  // Sort by priority
   categories.sort((a, b) => a.priority - b.priority);
-  
   return categories;
 }
 
@@ -418,35 +670,73 @@ function categorizeEmail(subject, snippet, categories) {
 }
 
 /**
- * Creates a log row from a Gmail message
+ * Creates an enriched log row from a Gmail message
  */
-function createLogRow(message, rule, categories, logBody, bodyMaxChars) {
+function createEnrichedLogRow(message, rule, categories, logBody, bodyMaxChars, internalEmails, threadSummary, ss) {
   const subject = message.getSubject();
+  const fromRaw = message.getFrom();
+  const toRaw = message.getTo();
+  const ccRaw = message.getCc() || '';
   const snippet = message.getPlainBody().substring(0, logBody ? bodyMaxChars : 100);
   const category = categorizeEmail(subject, snippet, categories);
   
+  // Extract email addresses
+  const fromEmail = extractEmailAddress(fromRaw);
+  const toEmails = extractAllEmailAddresses(toRaw);
+  const allParticipants = getParticipants(fromRaw, toEmails, ccRaw);
+  
+  // Determine direction
+  const direction = determineDirection(fromEmail, toEmails, internalEmails);
+  
+  // Extract primary contact
+  const primaryContact = extractPrimaryContact(direction, fromEmail, toEmails, internalEmails);
+  
+  // Extract domain
+  const domain = extractDomain(primaryContact);
+  
+  // Is internal?
+  const isInternal = isInternalEmail(fromEmail, toEmails, internalEmails) ? 'Yes' : 'No';
+  
+  // Waiting on
+  const waitingOn = computeWaitingOn(direction, threadSummary.lastSender, primaryContact, internalEmails);
+  
   // Build Gmail link
   const messageId = message.getId();
-  const thread = message.getThread();
-  const threadId = thread.getId();
+  const threadId = message.getThread().getId();
   const gmailLink = `https://mail.google.com/mail/u/0/#inbox/${threadId}`;
   
-  // Get labels as comma-separated string (labels exist on threads, not messages)
-  const labels = thread.getLabels().map(l => l.getName()).join(', ');
+  // Get labels
+  const labels = message.getThread().getLabels().map(l => l.getName()).join(', ');
+  
+  // Client ID (will be populated by client-reminder sync)
+  const clientId = '';
   
   return [
-    new Date().toISOString(),      // Logged At
-    rule.name,                      // Rule Name
-    message.getFrom(),              // From
-    message.getTo(),                // To
-    subject,                        // Subject
-    message.getDate().toISOString(), // Date Sent
-    category,                       // Category
-    snippet,                        // Snippet
-    labels,                         // Labels
-    messageId,                      // Message ID
-    threadId,                       // Thread ID
-    gmailLink                       // Gmail Link
+    new Date().toISOString(),        // A - Logged At
+    rule.name,                         // B - Rule Name
+    fromRaw,                           // C - From (raw)
+    toRaw,                             // D - To (raw)
+    subject,                           // E - Subject
+    message.getDate().toISOString(),   // F - Date Sent
+    category,                          // G - Category
+    snippet,                           // H - Snippet
+    labels,                            // I - Labels
+    messageId,                         // J - Message ID
+    threadId,                          // K - Thread ID
+    gmailLink,                         // L - Gmail Link
+    // Enriched metadata
+    primaryContact,                    // M - Primary Contact Email
+    direction,                         // N - Direction
+    domain,                            // O - Domain
+    allParticipants.join(', '),        // P - Participants
+    allParticipants.length,            // Q - Participants Count
+    isInternal,                        // R - Is Internal
+    threadSummary.messageCount,        // S - Thread Message Count
+    threadSummary.startDate ? threadSummary.startDate.toISOString() : '',  // T - Thread Start Date
+    threadSummary.lastDate ? threadSummary.lastDate.toISOString() : '',    // U - Last Message In Thread
+    threadSummary.lastSender,          // V - Last Sender
+    waitingOn,                         // W - Waiting On
+    clientId                           // X - Client ID
   ];
 }
 
